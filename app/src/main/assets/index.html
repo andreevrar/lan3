@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#17191c">
+<meta name="color-scheme" content="dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>ТВ-пульт</title>
+<style>
+  :root {
+    --bg: #17191c;
+    --body-1: #30343a;
+    --body-2: #24272c;
+    --key-1: #3b4047;
+    --key-2: #2f3338;
+    --well: #1b1e22;
+    --ink: #d5d8dd;
+    --ink-dim: #8b919a;
+    --edge: rgba(255, 255, 255, .07);
+    --fog: #b9c5d1;
+    --sage: #8fb39b;
+    --sand: #c9aa74;
+    --rose: #b9807c;
+    --font: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; color: var(--ink); font: 16px/1.4 var(--font); }
+  body {
+    min-height: 100vh;
+    padding: max(14px, env(safe-area-inset-top)) 16px max(28px, env(safe-area-inset-bottom));
+    background: radial-gradient(120% 55% at 50% 0%, #23262b 0%, var(--bg) 70%) fixed;
+  }
+  .wrap { max-width: 400px; margin: 0 auto; }
+  .i { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+  /* ---------- статус ---------- */
+  header { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 6px 0 14px; min-height: 36px; }
+  #dot { width: 9px; height: 9px; border-radius: 50%; background: #5a6068; box-shadow: 0 0 0 3px rgba(0,0,0,.25) inset; flex: none; }
+  #dot.ok { background: var(--sage); box-shadow: 0 0 10px 1px rgba(143,179,155,.55); }
+  #dot.warn { background: var(--sand); box-shadow: 0 0 10px 1px rgba(201,170,116,.45); animation: breathe 2.4s ease-in-out infinite; }
+  #dot.err { background: var(--rose); box-shadow: 0 0 10px 1px rgba(185,128,124,.45); }
+  @keyframes breathe { 50% { opacity: .45; } }
+  #statusText { font-size: 13px; color: var(--ink-dim); text-align: center; }
+
+  /* ---------- вкладки: утопленная дорожка и «приподнятая» вкладка ---------- */
+  .tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; margin-bottom: 18px; border-radius: 18px;
+    background: var(--well); box-shadow: inset 0 3px 8px rgba(0,0,0,.6), 0 1px 0 var(--edge); }
+  .tabs button { border: 0; background: transparent; color: var(--ink-dim); padding: 10px 4px; border-radius: 14px; font: inherit; font-size: 14px; font-weight: 600; }
+  .tabs button.on { color: var(--ink); background: linear-gradient(180deg, var(--key-1), var(--key-2));
+    box-shadow: 0 1px 0 rgba(255,255,255,.09) inset, 0 4px 8px rgba(0,0,0,.45), 0 1px 2px rgba(0,0,0,.5); }
+
+  .vstate { font-size: 17px; text-align: center; padding: 10px 6px 16px; color: var(--ink-dim); }
+  body.listening .vstate { color: var(--ink); }
+  #micBtn { width: 100%; min-height: 84px; font-size: 20px; }
+  .vheard { min-height: 1.4em; margin-top: 14px; text-align: center; font-size: 18px; }
+  .tab { display: none; }
+  .tab.on { display: block; }
+
+  /* ---------- корпус пульта ---------- */
+  .remote { position: relative; border-radius: 46px; padding: 22px 20px 24px;
+    background: linear-gradient(165deg, var(--body-1), var(--body-2));
+    box-shadow: 0 1px 0 var(--edge) inset, 0 -12px 26px rgba(0,0,0,.22) inset, 0 34px 50px -14px rgba(0,0,0,.65), 0 10px 18px rgba(0,0,0,.4); }
+  .remote::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: .06;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"); }
+  .remote.panel { border-radius: 34px; }
+
+  .row { display: grid; gap: 12px; }
+  .r2 { grid-template-columns: repeat(2, 1fr); }
+  .r3 { grid-template-columns: repeat(3, 1fr); }
+  .r4 { grid-template-columns: repeat(4, 1fr); }
+  .gap { margin-top: 18px; }
+  .spread { display: flex; justify-content: space-between; align-items: center; }
+
+  /* ---------- клавиши ---------- */
+  .key { appearance: none; -webkit-appearance: none; border: 0; color: var(--ink); font: inherit; font-weight: 600;
+    display: grid; place-items: center; align-content: center; gap: 3px; min-height: 58px; padding: 6px; border-radius: 20px; width: 100%;
+    background: linear-gradient(180deg, var(--key-1), var(--key-2));
+    box-shadow: 0 1px 0 rgba(255,255,255,.1) inset, 0 -1px 0 rgba(0,0,0,.3) inset, 0 5px 9px rgba(0,0,0,.42), 0 1px 2px rgba(0,0,0,.5);
+    transition: box-shadow .12s, transform .12s, background .12s;
+    touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+  .key small { font-size: 11px; font-weight: 500; color: var(--ink-dim); line-height: 1; }
+  .key.down, .key:active { transform: translateY(1px); background: linear-gradient(180deg, #2d3136, #2a2e33);
+    box-shadow: 0 3px 7px rgba(0,0,0,.6) inset, 0 1px 0 rgba(255,255,255,.04); }
+  .key.round { width: 56px; height: 56px; min-height: 0; padding: 0; border-radius: 50%; }
+  .key.power { color: #cf9a96; }
+  .key.primary { color: #1b2229; background: linear-gradient(180deg, #c6d1dc, #a3b2c0);
+    box-shadow: 0 1px 0 rgba(255,255,255,.5) inset, 0 5px 9px rgba(0,0,0,.42), 0 1px 2px rgba(0,0,0,.5); }
+  .key.primary.down, .key.primary:active { background: linear-gradient(180deg, #a9b7c4, #98a7b5); box-shadow: 0 3px 7px rgba(0,0,0,.3) inset; }
+  :is(.key, .sector, .tabs button, summary):focus-visible, :is(textarea, input):focus-visible { outline: 2px solid var(--fog); outline-offset: 2px; }
+
+  /* ---------- круговая навигация ---------- */
+  .wheel { position: relative; width: min(72vw, 270px); aspect-ratio: 1; margin: 22px auto; border-radius: 50%; overflow: hidden;
+    background: #202328;
+    box-shadow: 0 0 0 9px #2a2d33, 0 0 0 10px rgba(255,255,255,.06), 0 22px 30px 4px rgba(0,0,0,.55), inset 0 2px 8px rgba(0,0,0,.7); }
+  .wheel.sm { width: min(58vw, 214px); margin: 18px auto; }
+  .wheel::before { content: ""; position: absolute; inset: 0; z-index: 2; pointer-events: none;
+    background:
+      linear-gradient(45deg, transparent calc(50% - 1.5px), #1b1e22 calc(50% - 1.5px) calc(50% + 1.5px), transparent calc(50% + 1.5px)),
+      linear-gradient(-45deg, transparent calc(50% - 1.5px), #1b1e22 calc(50% - 1.5px) calc(50% + 1.5px), transparent calc(50% + 1.5px)); }
+  .wheel::after { content: ""; position: absolute; inset: 0; z-index: 4; pointer-events: none; border-radius: 50%;
+    background: radial-gradient(120% 80% at 28% 6%, rgba(255,255,255,.08), transparent 52%); }
+  .sector { position: absolute; inset: 0; margin: 0; padding: 0; border: 0; display: flex; color: var(--ink);
+    background: radial-gradient(circle at 50% 50%, #3c4148 0%, #353a40 55%, #2d3137 100%);
+    transition: background .12s, color .12s; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+  .sector.down, .sector:active { background: #2a2e33; color: #fff; }
+  .s-up { clip-path: polygon(50% 50%, 0 0, 100% 0); align-items: flex-start; justify-content: center; padding-top: 11%; }
+  .s-right { clip-path: polygon(50% 50%, 100% 0, 100% 100%); align-items: center; justify-content: flex-end; padding-right: 11%; }
+  .s-dn { clip-path: polygon(50% 50%, 100% 100%, 0 100%); align-items: flex-end; justify-content: center; padding-bottom: 11%; }
+  .s-left { clip-path: polygon(50% 50%, 0 100%, 0 0); align-items: center; justify-content: flex-start; padding-left: 11%; }
+  .wheel .ok { position: absolute; z-index: 3; left: 50%; top: 50%; width: 38%; height: auto; aspect-ratio: 1; min-height: 0; padding: 0;
+    transform: translate(-50%, -50%); border-radius: 50%; font-size: 17px; letter-spacing: .06em;
+    background: linear-gradient(180deg, #484e56, #30343a);
+    box-shadow: 0 1px 0 rgba(255,255,255,.14) inset, 0 8px 14px rgba(0,0,0,.55), 0 0 0 5px #23262b; }
+  .wheel .ok.down, .wheel .ok:active { transform: translate(-50%, -50%) scale(.965); background: linear-gradient(180deg, #353a40, #2d3136);
+    box-shadow: 0 3px 8px rgba(0,0,0,.6) inset, 0 0 0 5px #23262b; }
+
+  /* ---------- качели громкости и каналов ---------- */
+  .mid { display: grid; grid-template-columns: 76px 1fr 76px; gap: 10px; align-items: stretch; }
+  .pill { display: grid; grid-template-rows: 1fr auto 1fr; align-items: center; padding: 6px; border-radius: 38px; min-height: 184px;
+    background: var(--well); box-shadow: inset 0 3px 9px rgba(0,0,0,.65), 0 1px 0 var(--edge); }
+  .pill .key { height: 100%; min-height: 56px; border-radius: 30px; background: transparent; box-shadow: none; color: var(--ink); }
+  .pill .key.down, .pill .key:active { transform: none; background: #2b2f34; box-shadow: inset 0 2px 7px rgba(0,0,0,.6); }
+  .pill .cap { text-align: center; font-size: 11px; color: var(--ink-dim); padding: 2px 0; }
+  .stack { display: grid; align-content: center; justify-items: center; gap: 16px; }
+
+  /* ---------- медиа-лоток ---------- */
+  .tray { display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px; padding: 6px; border-radius: 26px;
+    background: var(--well); box-shadow: inset 0 3px 9px rgba(0,0,0,.65), 0 1px 0 var(--edge); }
+  .tray .key { min-height: 50px; border-radius: 20px; background: transparent; box-shadow: none; }
+  .tray .key.down, .tray .key:active { transform: none; background: #2b2f34; box-shadow: inset 0 2px 7px rgba(0,0,0,.6); }
+
+  details { margin-top: 18px; border-radius: 22px; background: var(--well); box-shadow: inset 0 3px 9px rgba(0,0,0,.65), 0 1px 0 var(--edge); padding: 4px 12px; }
+  summary { cursor: pointer; color: var(--ink-dim); font-weight: 600; font-size: 14px; padding: 12px 4px; list-style: none; }
+  summary::-webkit-details-marker { display: none; }
+  details[open] summary { padding-bottom: 6px; }
+  details .row { padding: 6px 0 12px; }
+  details .key { min-height: 52px; font-size: 19px; }
+
+  /* ---------- поля ввода ---------- */
+  textarea, input[type=text] { width: 100%; border: 0; color: var(--ink); font: inherit; font-size: 17px; padding: 15px 16px; border-radius: 20px;
+    background: var(--well); box-shadow: inset 0 3px 10px rgba(0,0,0,.65), 0 1px 0 var(--edge); }
+  textarea { min-height: 130px; resize: vertical; }
+  ::placeholder { color: #5f656d; }
+  .field { margin-bottom: 16px; }
+  .field > span { display: block; font-size: 13px; color: var(--ink-dim); margin: 0 4px 8px; }
+  label.chk { display: flex; align-items: center; gap: 12px; color: var(--ink); font-size: 15px; }
+  label.chk.center { justify-content: center; }
+  input.sw { appearance: none; -webkit-appearance: none; flex: none; position: relative; width: 48px; height: 28px; margin: 0; border-radius: 14px; border: 0;
+    background: var(--well); box-shadow: inset 0 2px 6px rgba(0,0,0,.7), 0 1px 0 var(--edge); transition: background .15s; }
+  input.sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%;
+    background: linear-gradient(180deg, #d8dce1, #a9aeb5); box-shadow: 0 2px 4px rgba(0,0,0,.5); transition: transform .15s; }
+  input.sw:checked { background: #3a4a57; }
+  input.sw:checked::after { transform: translateX(20px); }
+  .stretch { margin: 14px 2px 16px; }
+  .hint { color: var(--ink-dim); font-size: 13px; margin: 14px 4px 0; }
+  .hint code { color: var(--ink); }
+  h3 { margin: 22px 4px 0; font-size: 14px; color: var(--ink-dim); font-weight: 600; }
+  .hidden { display: none !important; }
+
+  #toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); background: #0d0e10; color: var(--ink); padding: 10px 18px; border-radius: 16px; font-size: 14px;
+    box-shadow: 0 10px 24px rgba(0,0,0,.5), 0 1px 0 var(--edge) inset; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+    <symbol id="i-left" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol>
+    <symbol id="i-right" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+    <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3.5v8"/><path d="M6.4 6.9a8 8 0 1 0 11.2 0"/></symbol>
+    <symbol id="i-mute" viewBox="0 0 24 24"><path d="M4 9.5v5h3.5l4.5 4v-13l-4.5 4z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M19 7h1M4 17h1M11 17h9"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M4 11l8-7 8 7"/><path d="M6.5 9.5V19h11V9.5"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M4 6l8 6-8 6z"/><path d="M16 6v12M20 6v12"/></symbol>
+    <symbol id="i-rew" viewBox="0 0 24 24"><path d="M12 7l-7 5 7 5z"/><path d="M20 7l-7 5 7 5z"/></symbol>
+    <symbol id="i-ff" viewBox="0 0 24 24"><path d="M12 7l7 5-7 5z"/><path d="M4 7l7 5-7 5z"/></symbol>
+    <symbol id="i-prev" viewBox="0 0 24 24"><path d="M7 6v12"/><path d="M19 6l-9 6 9 6z"/></symbol>
+    <symbol id="i-next" viewBox="0 0 24 24"><path d="M17 6v12"/><path d="M5 6l9 6-9 6z"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M16 16l4 4"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 11v5"/><path d="M12 8h.01"/></symbol>
+    <symbol id="i-bs" viewBox="0 0 24 24"><path d="M9 6h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-5-6z"/><path d="M12.5 10l4 4M16.5 10l-4 4"/></symbol>
+    <symbol id="i-enter" viewBox="0 0 24 24"><path d="M19 6v6a2 2 0 0 1-2 2H6"/><path d="M10 10l-4 4 4 4"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  </defs>
+</svg>
+
+<div class="wrap">
+
+<header>
+  <div id="dot"></div>
+  <div id="statusText">Нет связи</div>
+</header>
+
+<nav class="tabs">
+  <button data-tab="remote" class="on">Пульт</button>
+  <button data-tab="voice">Голос</button>
+  <button data-tab="conn">Связь</button>
+</nav>
+
+<main>
+
+<!-- ======================= ПУЛЬТ ======================= -->
+<section id="remote" class="tab on">
+  <div class="remote">
+    <div class="spread">
+      <button class="key round power" data-k="POWER" aria-label="Питание" title="Питание"><svg class="i"><use href="#i-power"/></svg></button>
+      <button class="key round" data-k="SEARCH" aria-label="Поиск" title="Поиск"><svg class="i"><use href="#i-search"/></svg></button>
+    </div>
+
+    <div class="wheel">
+      <button class="sector s-up" data-k="UP" data-rep aria-label="Вверх"><svg class="i"><use href="#i-up"/></svg></button>
+      <button class="sector s-right" data-k="RIGHT" data-rep aria-label="Вправо"><svg class="i"><use href="#i-right"/></svg></button>
+      <button class="sector s-dn" data-k="DOWN" data-rep aria-label="Вниз"><svg class="i"><use href="#i-down"/></svg></button>
+      <button class="sector s-left" data-k="LEFT" data-rep aria-label="Влево"><svg class="i"><use href="#i-left"/></svg></button>
+      <button class="key ok" data-k="OK">OK</button>
+    </div>
+
+    <div class="row r3">
+      <button class="key" data-k="BACK" aria-label="Назад"><svg class="i"><use href="#i-back"/></svg><small>Назад</small></button>
+      <button class="key" data-k="HOME" aria-label="Домой"><svg class="i"><use href="#i-home"/></svg><small>Домой</small></button>
+      <button class="key" data-k="MENU" aria-label="Меню"><svg class="i"><use href="#i-menu"/></svg><small>Меню</small></button>
+    </div>
+
+    <div class="mid gap">
+      <div class="pill">
+        <button class="key" data-k="VOL_UP" data-rep aria-label="Громче"><svg class="i"><use href="#i-plus"/></svg></button>
+        <div class="cap">Звук</div>
+        <button class="key" data-k="VOL_DOWN" data-rep aria-label="Тише"><svg class="i"><use href="#i-minus"/></svg></button>
+      </div>
+      <div class="stack">
+        <button class="key round" data-k="MUTE" aria-label="Без звука" title="Без звука"><svg class="i"><use href="#i-mute"/></svg></button>
+        <button class="key round" data-k="SETTINGS" aria-label="Настройки" title="Настройки"><svg class="i"><use href="#i-sliders"/></svg></button>
+      </div>
+      <div class="pill">
+        <button class="key" data-k="CH_UP" data-rep aria-label="Канал вверх"><svg class="i"><use href="#i-plus"/></svg></button>
+        <div class="cap">Канал</div>
+        <button class="key" data-k="CH_DOWN" data-rep aria-label="Канал вниз"><svg class="i"><use href="#i-minus"/></svg></button>
+      </div>
+    </div>
+
+    <div class="tray gap">
+      <button class="key" data-k="PREV" aria-label="Предыдущий"><svg class="i"><use href="#i-prev"/></svg></button>
+      <button class="key" data-k="REWIND" aria-label="Назад по записи"><svg class="i"><use href="#i-rew"/></svg></button>
+      <button class="key" data-k="PLAY_PAUSE" aria-label="Пуск и пауза"><svg class="i"><use href="#i-play"/></svg></button>
+      <button class="key" data-k="FF" aria-label="Вперёд по записи"><svg class="i"><use href="#i-ff"/></svg></button>
+      <button class="key" data-k="NEXT" aria-label="Следующий"><svg class="i"><use href="#i-next"/></svg></button>
+    </div>
+  </div>
+
+  <details>
+    <summary>Цифры</summary>
+    <div class="row r3">
+      <button class="key" data-k="1">1</button>
+      <button class="key" data-k="2">2</button>
+      <button class="key" data-k="3">3</button>
+      <button class="key" data-k="4">4</button>
+      <button class="key" data-k="5">5</button>
+      <button class="key" data-k="6">6</button>
+      <button class="key" data-k="7">7</button>
+      <button class="key" data-k="8">8</button>
+      <button class="key" data-k="9">9</button>
+      <button class="key" data-k="INFO" aria-label="Информация"><svg class="i"><use href="#i-info"/></svg></button>
+      <button class="key" data-k="0">0</button>
+      <button class="key" data-k="SEARCH" aria-label="Поиск"><svg class="i"><use href="#i-search"/></svg></button>
+    </div>
+  </details>
+</section>
+
+<!-- ======================= ГОЛОС ======================= -->
+<section id="voice" class="tab">
+  <div class="remote panel">
+    <div id="voiceState" class="vstate">ТВ пока не просит голос</div>
+    <button class="key primary" id="micBtn" aria-label="Говорить">Говорить</button>
+    <div id="voiceHeard" class="vheard"></div>
+
+    <div class="field" style="margin-top:18px">
+      <span>Запасной способ: надиктуйте клавиатурой телефона (значок микрофона на ней) и отправьте</span>
+      <textarea id="voiceText" placeholder="Текст для голосового ввода на ТВ" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
+    </div>
+    <button class="key" id="voiceSend">Отправить на ТВ</button>
+  </div>
+  <p class="hint">Как это работает: в приложении на ТВ нажмите значок микрофона (голосовой поиск). Эта страница сама откроется на вкладке «Голос» и телефон вздрогнет. Нажмите «Говорить» (если запись не началась сама), скажите фразу, и она придёт в приложение на ТВ как будто её продиктовали на ТВ. Работает в приложениях, которые используют обычное распознавание речи Android; для этого в приложении ТВ должна быть включена кнопка «голосовой ввод через микрофон телефона». Распознаёт браузер телефона (Chrome), нужен интернет на телефоне.</p>
+</section>
+
+<!-- ======================= СВЯЗЬ ======================= -->
+<section id="conn" class="tab">
+  <div class="remote panel">
+    <div class="field">
+      <span>Код ТВ с экрана приложения</span>
+      <input type="text" id="codeInput" placeholder="abcd-efgh-ijkl" autocomplete="off" autocapitalize="off" spellcheck="false">
+    </div>
+    <button class="key primary" id="connectBtn">Подключиться</button>
+    <p class="hint" id="detail"></p>
+  </div>
+  <p class="hint">Телефон и ТВ должны быть в одной сети Wi-Fi. Интернет не нужен: страница открыта прямо с ТВ. Код хранится только в этом браузере. Кто знает код и находится в вашей сети, тот может управлять ТВ. Если в приложении создали новый код, введите его здесь заново. Можно открыть страницу сразу с кодом: <code>http://адрес-тв:8080/#abcd-efgh-ijkl</code>. Чтобы пульт был всегда под рукой, добавьте страницу на главный экран телефона.</p>
+</section>
+
+</main>
+</div>
+
+<div id="toast"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (s) { return document.querySelector(s); };
+  var $$ = function (s) { return Array.prototype.slice.call(document.querySelectorAll(s)); };
+
+  // ---------- хранилище ----------
+  function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+
+  var state = {
+    code: lsGet('tv.code') || ''
+  };
+  var hashCode = (location.hash || '').replace('#', '');
+  if (hashCode) {
+    state.code = hashCode;
+    lsSet('tv.code', hashCode);
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+  }
+
+  function normCode(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+  function prettyCode(s) { var c = normCode(s); return c.replace(/(.{4})(?=.)/g, '$1-'); }
+
+  // ---------- UI: статус, тосты ----------
+  var dot = $('#dot'), statusText = $('#statusText'), detail = $('#detail');
+  function setStatus(kind, text) {
+    dot.className = kind || '';
+    statusText.textContent = text;
+  }
+  var toastTimer = null;
+  function toast(msg) {
+    var t = $('#toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.classList.remove('show'); }, 1800);
+  }
+
+  // ---------- вкладки ----------
+  $$('.tabs button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      $$('.tabs button').forEach(function (x) { x.classList.toggle('on', x === b); });
+      $$('.tab').forEach(function (s) { s.classList.toggle('on', s.id === b.dataset.tab); });
+    });
+  });
+
+  // ---------- связь с ТВ: WebSocket на самом ТВ (тот же адрес, откуда открыта страница) ----------
+  var ws = null;
+  var reconnectTimer = null;
+  var blocked = false; // true после «неверный код»: сами не переподключаемся
+  var tv = null; // последний статус от ТВ; null — ещё не авторизовались
+
+  function renderTv() {
+    if (!tv) return;
+    detail.textContent = 'Состояние ТВ — ADB: ' + (tv.adb ? 'да' : 'нет') + ', Спец. возможности: ' + (tv.acc ? 'да' : 'нет');
+    if (tv.adb || tv.acc) setStatus('ok', 'ТВ на связи');
+    else setStatus('warn', 'ТВ на связи: работают звук и медиа, для стрелок включите спец. возможности на ТВ');
+  }
+
+  function connect() {
+    clearTimeout(reconnectTimer);
+    if (ws) { var old = ws; ws = null; try { old.close(); } catch (e) {} }
+    tv = null;
+    var code = normCode(state.code);
+    if (code.length < 8) { setStatus('', 'Введите код ТВ на вкладке «Связь»'); return; }
+    if (!location.host || location.protocol === 'file:') {
+      setStatus('err', 'Откройте страницу по адресу ТВ (он показан на экране ТВ), а не как файл');
+      return;
+    }
+    setStatus('warn', 'Подключаюсь к ТВ…');
+
+    var sock;
+    try {
+      sock = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+    } catch (e) {
+      setStatus('err', 'Не удалось открыть соединение');
+      return;
+    }
+    ws = sock;
+    var denied = false, pingTimer = null, watchdog = null;
+    // если за 6 секунд соединение не открылось (ТВ ещё спит), пробуем заново, не ждём системный таймаут
+    var openTimer = setTimeout(function () { if (sock === ws && sock.readyState === 0) connect(); }, 6000);
+
+    // страница шлёт пинг раз в 5 с; если ТВ молчит дольше 12 с, связь считаем потерянной
+    function arm() {
+      clearTimeout(watchdog);
+      watchdog = setTimeout(function () { if (sock === ws) connect(); }, 12000);
+    }
+
+    sock.onopen = function () {
+      if (sock !== ws) return;
+      clearTimeout(openTimer);
+      sock.send(JSON.stringify({ t: 'auth', c: code }));
+      pingTimer = setInterval(function () {
+        if (sock.readyState === 1) sock.send('{"t":"ping"}');
+      }, 5000);
+      arm();
+    };
+    sock.onmessage = function (ev) {
+      if (sock !== ws) return;
+      var m;
+      try { m = JSON.parse(ev.data); } catch (e) { return; }
+      if (m.t === 'denied') {
+        denied = true;
+        blocked = true;
+        setStatus('err', 'Неверный код. Сверьте его с экраном ТВ');
+        $$('.tabs button')[2].click();
+        return;
+      }
+      arm();
+      if (m.t === 'listen') { onListen(m); return; }
+      if (m.t === 'listen_stop') { if (rec) { try { rec.stop(); } catch (e) {} } else if (!sentFinal && heard) finish(heard); return; }
+      if (m.t === 'listen_cancel') { if (!sentFinal) { sentFinal = true; vSay('ТВ отменил запрос'); } endListening(); return; }
+      if (m.online) { tv = m; renderTv(); }
+    };
+    sock.onclose = function () {
+      clearTimeout(openTimer);
+      clearInterval(pingTimer);
+      clearTimeout(watchdog);
+      if (sock !== ws || denied) return;
+      tv = null;
+      setStatus('err', 'Нет связи с ТВ (включён ли он и приложение? та же ли сеть Wi-Fi?)');
+      reconnectTimer = setTimeout(connect, 2000);
+    };
+    sock.onerror = function () {};
+  }
+
+  function send(obj) {
+    if (!ws || ws.readyState !== 1 || !tv) { toast('Нет связи с ТВ'); return false; }
+    ws.send(JSON.stringify(obj));
+    return true;
+  }
+
+  // вернулись на вкладку / появилась сеть / тап по строке состояния — если связи нет, подключаемся сразу
+  function kick() {
+    if (normCode(state.code).length < 8) return;
+    if (!ws || ws.readyState > 1) connect();
+    else if (ws.readyState === 1) { try { ws.send('{"t":"ping"}'); } catch (e) { connect(); } }
+  }
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) kick(); });
+  window.addEventListener('online', kick);
+  window.addEventListener('focus', kick);
+  window.addEventListener('pageshow', kick);
+  setInterval(function () {
+    if (!blocked && normCode(state.code).length >= 8 && (!ws || ws.readyState > 1)) connect();
+  }, 3000);
+  [dot, statusText].forEach(function (el) { el.addEventListener('click', function () { blocked = false; connect(); }); });
+
+  // ---------- кнопки пульта ----------
+  function buzz() { try { if (navigator.vibrate) navigator.vibrate(8); } catch (e) {} }
+  function fire(k) { buzz(); return send({ t: 'key', k: k }); }
+
+  function backspace() { fire('DEL'); }
+  function enter() { fire('ENTER'); }
+
+  function press(btn) {
+    var act = btn.dataset.act;
+    if (act === 'bs') backspace();
+    else if (act === 'enter') enter();
+    else if (btn.dataset.k) fire(btn.dataset.k);
+  }
+
+  $$('[data-k],[data-act]').forEach(function (btn) {
+    var t1 = null, t2 = null;
+    function stop() { clearTimeout(t1); clearInterval(t2); t1 = t2 = null; btn.classList.remove('down'); }
+    btn.addEventListener('pointerdown', function (e) {
+      e.preventDefault(); // не забираем фокус у поля ввода
+      btn.classList.add('down');
+      press(btn);
+      if (btn.hasAttribute('data-rep')) {
+        t1 = setTimeout(function () { t2 = setInterval(function () { press(btn); }, 220); }, 400);
+      }
+    });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(function (ev) { btn.addEventListener(ev, stop); });
+    btn.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  });
+
+  // ---------- голос: микрофон телефона ----------
+  // ТВ (приложение с кнопкой микрофона) присылает {t:'listen'}; телефон распознаёт речь и шлёт {t:'voice', v, final}.
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var voiceId = 0, rec = null, heard = '', sentFinal = true, recErr = false;
+  var vState = $('#voiceState'), vHeard = $('#voiceHeard'), vText = $('#voiceText');
+  function vSay(t) { vState.textContent = t; }
+  function vSend(o) { o.t = 'voice'; o.id = voiceId; return send(o); }
+  function stopRec() { var r = rec; rec = null; if (r) { try { r.abort(); } catch (e) {} } }
+  function endListening() { document.body.classList.remove('listening'); stopRec(); }
+
+  function finish(txt) {
+    if (sentFinal) return;
+    txt = (txt || '').trim();
+    if (!txt) { fail('no-speech'); return; }
+    sentFinal = true;
+    vSend({ v: txt, final: true });
+    vSay('Отправлено на ТВ: ' + txt);
+    endListening();
+  }
+  function fail(err) {
+    if (sentFinal) return;
+    sentFinal = true;
+    vSend({ err: err });
+    vSay('Ничего не услышал');
+    endListening();
+  }
+
+  function startRec(lang) {
+    stopRec();
+    recErr = false;
+    if (!SR) { vSay('Этот браузер не распознаёт речь — надиктуйте клавиатурой телефона ниже'); return; }
+    try {
+      var r = new SR();
+      rec = r;
+      r.lang = lang || 'ru-RU';
+      r.interimResults = true;
+      r.continuous = false;
+      r.maxAlternatives = 1;
+      r.onresult = function (e) {
+        if (r !== rec) return;
+        var txt = '', fin = false;
+        for (var i = 0; i < e.results.length; i++) {
+          txt += e.results[i][0].transcript;
+          if (e.results[i].isFinal) fin = true;
+        }
+        heard = txt;
+        vHeard.textContent = txt;
+        if (fin) finish(txt); else vSend({ v: txt, final: false });
+      };
+      r.onerror = function (e) {
+        if (r !== rec) return;
+        recErr = true;
+        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') vSay('Нет доступа к микрофону: нажмите «Говорить» и разрешите, либо используйте поле ниже');
+        else if (e.error === 'no-speech') fail('no-speech');
+        else if (e.error === 'network') vSay('Нет интернета на телефоне для распознавания речи');
+        else if (e.error !== 'aborted') vSay('Ошибка распознавания: ' + e.error);
+      };
+      r.onend = function () {
+        if (r !== rec) return;
+        rec = null;
+        if (!sentFinal && heard) finish(heard);
+        else if (!sentFinal && !recErr) vSay('Не услышал — нажмите «Говорить»');
+      };
+      r.start();
+      vSay('Слушаю — говорите');
+    } catch (e) {
+      vSay('Нажмите «Говорить»');
+    }
+  }
+
+  function onListen(m) {
+    voiceId = m.id || 0;
+    heard = '';
+    sentFinal = false;
+    vHeard.textContent = '';
+    document.body.classList.add('listening');
+    $$('.tabs button')[1].click();
+    try { if (navigator.vibrate) navigator.vibrate([120, 60, 120]); } catch (e) {}
+    vSay('ТВ ждёт голос. Говорите (или нажмите «Говорить»)');
+    startRec(m.lang);
+  }
+
+  $('#micBtn').addEventListener('click', function () {
+    if (!voiceId || sentFinal) { vSay('ТВ сейчас не слушает: нажмите значок микрофона в приложении на ТВ'); return; }
+    heard = '';
+    vHeard.textContent = '';
+    startRec('ru-RU');
+  });
+  $('#voiceSend').addEventListener('click', function () {
+    if (!voiceId || sentFinal) { toast('ТВ сейчас не просит голос'); return; }
+    var v = vText.value.trim();
+    if (!v) { toast('Поле пустое'); return; }
+    finish(v);
+    vText.value = '';
+  });
+
+  // ---------- вкладка «Связь» ----------
+  var codeInput = $('#codeInput');
+  codeInput.value = prettyCode(state.code);
+
+  $('#connectBtn').addEventListener('click', function () {
+    var code = normCode(codeInput.value);
+    if (code.length < 8) { toast('Код слишком короткий'); return; }
+    state.code = code;
+    blocked = false;
+    lsSet('tv.code', state.code);
+    codeInput.value = prettyCode(code);
+    connect();
+    $$('.tabs button')[0].click();
+  });
+
+  // ---------- старт ----------
+  if (normCode(state.code).length >= 8) connect();
+  else {
+    setStatus('', 'Введите код ТВ на вкладке «Связь»');
+    $$('.tabs button')[2].click();
+  }
+})();
+</script>
+</body>
+</html>

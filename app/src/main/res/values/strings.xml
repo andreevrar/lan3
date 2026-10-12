@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ТВ-пульт</string>
+    <string name="acc_desc">Нужна, чтобы вводить текст с телефона и двигать фокус, если ADB недоступен.</string>
+</resources>
