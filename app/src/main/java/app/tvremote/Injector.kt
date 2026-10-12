@@ -36,6 +36,7 @@ object Injector {
             val line = r.readLine() ?: break
             try {
                 run(line, kcm)
+                println("ok")
             } catch (e: Throwable) {
                 println("ERR $e")
             }

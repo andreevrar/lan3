@@ -367,7 +367,12 @@
 
   function renderTv() {
     if (!tv) return;
-    detail.textContent = 'Состояние ТВ — ADB: ' + (tv.adb ? 'да' : 'нет') + ', Спец. возможности: ' + (tv.acc ? 'да' : 'нет');
+    var lines = ['Состояние ТВ — ADB: ' + (tv.adb ? 'да' : 'нет') + ', быстрые кнопки: ' + (tv.fast ? 'да' : 'нет') + ', спец. возможности: ' + (tv.acc ? 'да' : 'нет') + ', сторож: ' + (tv.sup ? 'да' : 'нет')];
+    if (tv.lk) lines.push('Последняя кнопка: ' + tv.lk);
+    if (tv.rsn) lines.push('Служба запущена: ' + tv.rsn);
+    if (tv.ev && tv.ev.length) { lines.push('Журнал ТВ:'); lines = lines.concat(tv.ev); }
+    detail.style.whiteSpace = 'pre-line';
+    detail.textContent = lines.join('\n');
     if (tv.adb || tv.acc) setStatus('ok', 'ТВ на связи');
     else setStatus('warn', 'ТВ на связи: работают звук и медиа, для стрелок включите спец. возможности на ТВ');
   }
@@ -434,7 +439,7 @@
       clearTimeout(watchdog);
       if (sock !== ws || denied) return;
       tv = null;
-      setStatus('err', 'Нет связи с ТВ (включён ли он и приложение? та же ли сеть Wi-Fi?)');
+      setStatus('err', 'Нет связи с ТВ — пробую снова. Если долго: сверьте адрес ' + location.host + ' с адресом на экране ТВ (после выключения он мог поменяться)');
       reconnectTimer = setTimeout(connect, 2000);
     };
     sock.onerror = function () {};
@@ -517,10 +522,25 @@
     endListening();
   }
 
+  // Запасной путь: диктовка значком микрофона на клавиатуре телефона; текст уходит на ТВ сам, когда вы замолчали
+  var idleTimer = null;
+  function typeFallback(why) {
+    vSay(why + ' Нажмите на поле ниже и продиктуйте текст микрофоном на клавиатуре телефона.');
+    try { vText.focus(); } catch (e) {}
+  }
+  vText.addEventListener('input', function () {
+    clearTimeout(idleTimer);
+    if (!voiceId || sentFinal) return;
+    idleTimer = setTimeout(function () {
+      var v = vText.value.trim();
+      if (v && !sentFinal) { finish(v); vText.value = ''; }
+    }, 1800);
+  });
+
   function startRec(lang) {
     stopRec();
     recErr = false;
-    if (!SR) { vSay('Этот браузер не распознаёт речь — надиктуйте клавиатурой телефона ниже'); return; }
+    if (!SR) { typeFallback('Этот браузер не распознаёт речь.'); return; }
     try {
       var r = new SR();
       rec = r;
@@ -542,7 +562,7 @@
       r.onerror = function (e) {
         if (r !== rec) return;
         recErr = true;
-        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') vSay('Нет доступа к микрофону: нажмите «Говорить» и разрешите, либо используйте поле ниже');
+        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') typeFallback('Браузер не дал микрофон для этой страницы.');
         else if (e.error === 'no-speech') fail('no-speech');
         else if (e.error === 'network') vSay('Нет интернета на телефоне для распознавания речи');
         else if (e.error !== 'aborted') vSay('Ошибка распознавания: ' + e.error);

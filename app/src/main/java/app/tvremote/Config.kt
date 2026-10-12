@@ -50,6 +50,9 @@ object Status {
     @Volatile var lastWake: String = "—"
     /** Сколько раз самопроверка перезапускала веб-сервер. */
     @Volatile var webRestarts: Int = 0
+    /** Чем закончилась последняя кнопка (помощник / input / спец. возможности) и когда помощник отвечал в последний раз. */
+    @Volatile var lastKey: String = "—"
+    @Volatile var lastAck: Long = 0L
 }
 
 /** Адреса ТВ в домашней сети. */

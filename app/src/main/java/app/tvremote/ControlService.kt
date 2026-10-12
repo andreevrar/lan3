@@ -83,6 +83,9 @@ class ControlService : Service() {
             "sup" -> "сторож в системе ТВ"
             else -> intent.getStringExtra("why") ?: "—"
         }
+        // плановые проверки (будильник, задание, сторож) в журнал не пишем, пока служба жива, иначе он забьётся ими
+        val routine = why == "будильник" || why == "задание системы" || why == "сторож в системе ТВ" || why == "служба спец. возможностей"
+        if (!started || !routine) EventLog.add("служба: запрос на запуск — $why" + (if (started) " (уже работает)" else ""))
         if (!started) {
             started = true
             Status.startReason = why
@@ -101,6 +104,7 @@ class ControlService : Service() {
         stopped = true
         alive = false
         if (current === this) current = null
+        EventLog.add("служба остановлена")
         try {
             unregisterReceiver(wakeReceiver)
         } catch (_: Throwable) {
@@ -209,13 +213,24 @@ class ControlService : Service() {
     private fun wakeCheck() {
         if (stopped) return
         webSched.execute { try { checkWeb() } catch (_: Throwable) {} }
-        val ok = adb.shell("echo ok")
-        Status.adbOk = ok
+        var ok = adb.shell("echo ok")
+        if (!ok) {
+            // соединение могло «протухнуть» за время сна: начинаем заново
+            adb.reset()
+            ok = adb.shell("echo ok")
+            EventLog.add("после пробуждения ADB " + (if (ok) "переподключён" else "недоступен"))
+        }
+        setAdb(ok)
         if (ok) {
             adb.warmUp()
             if (!Status.supervisor) Status.supervisor = adb.ensureSupervisor()
         }
         publishStatus()
+    }
+
+    private fun setAdb(ok: Boolean) {
+        if (Status.adbOk != ok) EventLog.add("ADB: " + (if (ok) "подключён" else "нет связи"))
+        Status.adbOk = ok
     }
 
     // ---------- самопроверка веб-сервера ----------
@@ -257,6 +272,7 @@ class ControlService : Service() {
         }
         if (!ok) {
             Status.webRestarts++
+            EventLog.add("сервер не отвечал — перезапуск")
             try {
                 w.stop()
             } catch (_: Throwable) {
@@ -273,8 +289,12 @@ class ControlService : Service() {
 
     private fun probeAdb() {
         if (stopped) return
-        val ok = adb.shell("echo ok")
-        Status.adbOk = ok
+        var ok = adb.shell("echo ok")
+        if (!ok && Status.adbOk) {
+            adb.reset()
+            ok = adb.shell("echo ok")
+        }
+        setAdb(ok)
         if (ok) {
             adb.warmUp() // быстрый помощник для кнопок; если он завершился, поднимется снова
             if (!accEnsured) {
@@ -306,6 +326,7 @@ class ControlService : Service() {
             web = w
             Status.server = "работает"
             Status.port = w.port
+            EventLog.add("сервер: порт ${w.port}, адреса " + Net.localIps().joinToString(" "))
         } catch (e: Throwable) {
             Status.server = "ошибка: " + (e.message ?: e.javaClass.simpleName)
             if (!stopped) webSched.schedule({ startWeb() }, 10L, TimeUnit.SECONDS)
@@ -321,6 +342,8 @@ class ControlService : Service() {
             .put("txt", Status.lastText)
             .put("sup", Status.supervisor)
             .put("rsn", Status.startReason)
+            .put("lk", Status.lastKey)
+            .put("ev", org.json.JSONArray(EventLog.tail(6)))
             .toString()
 
     private fun publishStatus() {
@@ -407,12 +430,26 @@ class ControlService : Service() {
             "UP", "DOWN", "LEFT", "RIGHT", "OK", "ENTER", "BACK", "HOME", "SEARCH", "MENU" -> typed = ""
         }
         if (Status.adbOk) {
-            if (adb.inject("k $code")) return // быстрый путь: помощник уже запущен
+            if (adb.inject("k $code")) {
+                Status.lastKey = "$name: помощник"
+                return // быстрый путь: помощник уже запущен
+            }
             kickInjector()
-            if (adb.shell("input keyevent $code")) return // медленный запасной путь
-            Status.adbOk = false
+            if (adb.shell("input keyevent $code")) { // медленный запасной путь
+                Status.lastKey = "$name: через input"
+                return
+            }
+            // соединение могло протухнуть: сбрасываем и пробуем ещё раз
+            adb.reset()
+            if (adb.shell("input keyevent $code")) {
+                Status.lastKey = "$name: через input после сброса ADB"
+                EventLog.add("ADB был «мёртвым», переподключён")
+                return
+            }
+            setAdb(false)
             publishStatus()
         }
+        Status.lastKey = "$name: без ADB"
         // режим без ADB: громкость и медиа-кнопки обрабатываются самой системой
         if (softKey(name, code)) return
         // остальное через службу специальных возможностей

@@ -11,6 +11,8 @@ import android.content.Intent
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val app = context.applicationContext
+        EventLog.init(app)
+        if (intent.action != KeepAlive.ACTION) EventLog.add("сигнал: " + (intent.action ?: "?"))
         val why = when (intent.action) {
             Intent.ACTION_BOOT_COMPLETED -> "включение ТВ"
             "android.intent.action.QUICKBOOT_POWERON", "com.htc.intent.action.QUICKBOOT_POWERON" -> "быстрое включение ТВ"

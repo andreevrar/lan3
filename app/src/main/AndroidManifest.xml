@@ -7,6 +7,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <uses-feature
         android:name="android.hardware.touchscreen"
@@ -16,6 +17,7 @@
         android:required="false" />
 
     <application
+        android:name=".App"
         android:allowBackup="false"
         android:banner="@drawable/banner"
         android:icon="@drawable/ic_launcher"
@@ -35,6 +37,17 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".PhoneVoiceActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:theme="@android:style/Theme.Material.NoActionBar">
+            <intent-filter>
+                <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name=".ControlService"
             android:exported="false" />
@@ -51,6 +64,11 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_config" />
         </service>
+
+        <service
+            android:name=".KeepJobService"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
 
         <service
             android:name=".PhoneRecognitionService"

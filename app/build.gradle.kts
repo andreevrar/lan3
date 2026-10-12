@@ -11,8 +11,19 @@ android {
         applicationId = "app.tvremote"
         minSdk = 21
         targetSdk = 33
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 3
+        versionName = "1.2"
+    }
+
+    // Постоянный ключ подписи лежит в репозитории (app/debug.keystore): все сборки подписаны одним ключом,
+    // поэтому новую версию можно ставить поверх старой, не удаляя приложение (ADB-разрешение и настройки сохраняются).
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {

@@ -44,12 +44,15 @@ class RemoteAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         instance = this
+        EventLog.init(this)
+        EventLog.add("спец. возможности: подключены")
         super.onServiceConnected()
         handler.removeCallbacks(watchdog)
         handler.post(watchdog)
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
+        EventLog.add("спец. возможности: отключены системой")
         instance = null
         handler.removeCallbacks(watchdog)
         return super.onUnbind(intent)

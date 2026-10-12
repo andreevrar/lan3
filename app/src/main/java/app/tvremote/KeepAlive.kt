@@ -15,6 +15,7 @@ object KeepAlive {
     const val ACTION = "app.tvremote.KEEPALIVE"
 
     fun schedule(c: Context) {
+        KeepJobService.schedule(c)
         try {
             val am = c.getSystemService(Context.ALARM_SERVICE) as AlarmManager
             val i = Intent(c, BootReceiver::class.java).setAction(ACTION)

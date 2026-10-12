@@ -21,6 +21,12 @@ class AdbClient(private val ctx: Context) {
     @Volatile private var inj: AdbShellStream? = null
     @Volatile private var injBlockedUntil = 0L
 
+    // Помощник отвечает "ok" на каждую команду. Если ответов нет дольше 2 с — он завис, перезапускаем.
+    private val ackLock = Any()
+    private var pendingAcks = 0
+    private var pendingSince = 0L
+    private var errStreak = 0
+
     // Соединение создаётся лениво и без сетевых операций, поэтому блокировка короткая.
     @Synchronized
     private fun connect(): Dadb? {
@@ -91,19 +97,37 @@ class AdbClient(private val ctx: Context) {
                 )
                 inj = st
                 Status.fast = true
-                // читаем вывод помощника, пока он жив; когда процесс завершится, помечаем его мёртвым
+                synchronized(ackLock) {
+                    pendingAcks = 0
+                    errStreak = 0
+                }
+                EventLog.add("помощник кнопок запущен")
+                // читаем ответы помощника, пока он жив; когда процесс завершится, помечаем его мёртвым
                 val t = Thread {
+                    val buf = StringBuilder()
                     try {
                         while (true) {
                             val p = st.read()
-                            if (p.javaClass.simpleName == "Exit") break
+                            val kind = p.javaClass.simpleName
+                            if (kind == "Exit") break
+                            buf.append(payloadOf(p))
+                            while (true) {
+                                val nl = buf.indexOf("\n")
+                                if (nl < 0) break
+                                val line = buf.substring(0, nl).trim()
+                                buf.delete(0, nl + 1)
+                                onHelperLine(st, line, kind == "StdError")
+                            }
+                            if (buf.length > 4000) buf.setLength(0)
                         }
                     } catch (_: Throwable) {
                     }
+                    if (buf.isNotEmpty()) EventLog.add("помощник: " + buf.toString().trim().take(160))
                     if (inj === st) {
                         inj = null
                         Status.fast = false
                     }
+                    EventLog.add("помощник кнопок завершился")
                     try {
                         st.close()
                     } catch (_: Throwable) {
@@ -123,11 +147,66 @@ class AdbClient(private val ctx: Context) {
         }
     }
 
-    /** Отправить команду помощнику. false — помощник не запущен или связь оборвалась. Сам он не запускается, чтобы не ждать. */
+    private fun payloadOf(p: Any): String = try {
+        String(p.javaClass.getMethod("getPayload").invoke(p) as ByteArray, Charsets.UTF_8)
+    } catch (_: Throwable) {
+        p.toString()
+    }
+
+    private fun onHelperLine(st: AdbShellStream, line: String, isErr: Boolean) {
+        if (line.isEmpty()) return
+        if (line == "ok") {
+            synchronized(ackLock) {
+                if (pendingAcks > 0) pendingAcks--
+                pendingSince = System.currentTimeMillis()
+                errStreak = 0
+            }
+            Status.lastAck = System.currentTimeMillis()
+            return
+        }
+        EventLog.add("помощник: " + line.take(160))
+        if (line.startsWith("ERR") || isErr) {
+            var bad = false
+            synchronized(ackLock) {
+                if (pendingAcks > 0) pendingAcks--
+                errStreak++
+                bad = errStreak >= 3
+            }
+            Status.lastKey = "ошибка помощника: " + line.take(60)
+            if (bad) killHelper(st, "3 ошибки подряд")
+        }
+    }
+
+    private fun killHelper(st: AdbShellStream, why: String) {
+        EventLog.add("помощник отключён: $why")
+        if (inj === st) {
+            inj = null
+            Status.fast = false
+        }
+        try {
+            st.close()
+        } catch (_: Throwable) {
+        }
+    }
+
+    /** Отправить команду помощнику. false — помощник не запущен, завис или связь оборвалась. Сам он не запускается, чтобы не ждать. */
     fun inject(line: String): Boolean {
         val st = inj ?: return false
+        val now = System.currentTimeMillis()
+        var hung = false
+        synchronized(ackLock) {
+            hung = pendingAcks > 0 && now - pendingSince > 2000
+        }
+        if (hung) {
+            killHelper(st, "нет ответа 2 с")
+            return false
+        }
         return try {
             synchronized(injLock) { st.write(line + "\n") }
+            synchronized(ackLock) {
+                if (pendingAcks == 0) pendingSince = now
+                pendingAcks++
+            }
             true
         } catch (_: Throwable) {
             if (inj === st) {
@@ -136,6 +215,11 @@ class AdbClient(private val ctx: Context) {
             }
             false
         }
+    }
+
+    /** Сбросить ADB-соединение и помощника (после пробуждения ТВ они могут быть «мёртвыми»). */
+    fun reset() {
+        drop()
     }
 
     // ---------- настройки системы ----------

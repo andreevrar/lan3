@@ -3,28 +3,36 @@ package app.tvremote
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.speech.RecognitionService
 import android.speech.SpeechRecognizer
 import org.json.JSONObject
+
+/** Кому отдаём результат распознавания: службе распознавания Android, экрану проверки или окну голосового ввода. */
+interface VoiceSink {
+    fun ready()
+    fun begin()
+    fun end()
+    fun partial(text: String)
+    fun result(text: String)
+    fun error(code: Int, why: String)
+}
 
 /**
  * Голосовой ввод через микрофон телефона.
  *
- * Когда приложение на ТВ просит распознать речь (SpeechRecognizer), [PhoneRecognitionService] зовёт сюда:
- * мы шлём странице на телефоне {"t":"listen"}, телефон слушает и распознаёт речь, присылает
- * {"t":"voice","id":…,"v":"текст","final":true}, а мы отдаём текст приложению на ТВ как результат распознавания.
- * Всё в главном потоке, чтобы не было гонок.
+ * Когда приложение на ТВ просит распознать речь, мы шлём странице на телефоне {"t":"listen"},
+ * телефон слушает и распознаёт речь, присылает {"t":"voice","id":…,"v":"текст","final":true},
+ * а мы отдаём текст приложению на ТВ как результат распознавания. Всё в главном потоке.
  */
 object VoiceBridge {
     private val main = Handler(Looper.getMainLooper())
-    private var cb: RecognitionService.Callback? = null
+    private var sink: VoiceSink? = null
     private var id = 0
     private var began = false
     private var timeout: Runnable? = null
 
     @Volatile var last: String = "ещё не использовали"
 
-    private fun bundle(text: String): Bundle {
+    fun bundle(text: String): Bundle {
         val b = Bundle()
         b.putStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION, arrayListOf(text))
         b.putFloatArray(SpeechRecognizer.CONFIDENCE_SCORES, floatArrayOf(1f))
@@ -41,39 +49,42 @@ object VoiceBridge {
     private fun clear() {
         timeout?.let { main.removeCallbacks(it) }
         timeout = null
-        cb = null
+        sink = null
         began = false
     }
 
     private fun fail(code: Int, why: String) {
-        val c = cb
+        val c = sink
         val wasId = id
         clear()
         last = "ошибка: $why"
+        EventLog.add("голос: $why")
         try {
-            c?.error(code)
+            c?.error(code, why)
         } catch (_: Throwable) {
         }
         ControlService.pages(JSONObject().put("t", "listen_cancel").put("id", wasId).toString())
     }
 
-    fun start(c: RecognitionService.Callback, lang: String?) {
+    fun start(c: VoiceSink, lang: String?) {
         main.post {
-            if (cb != null) clear()
+            if (sink != null) clear()
             if (Status.clients == 0) {
                 last = "ошибка: пульт на телефоне не открыт"
+                EventLog.add("голос: запрос есть, но пульт на телефоне не открыт")
                 try {
-                    c.error(SpeechRecognizer.ERROR_NETWORK)
+                    c.error(SpeechRecognizer.ERROR_NETWORK, "пульт на телефоне не открыт")
                 } catch (_: Throwable) {
                 }
                 return@post
             }
-            cb = c
+            sink = c
             id++
             began = false
             last = "слушает телефон…"
+            EventLog.add("голос: запрос от приложения, жду телефон")
             try {
-                c.readyForSpeech(Bundle())
+                c.ready()
             } catch (_: Throwable) {
             }
             ControlService.pages(
@@ -86,7 +97,7 @@ object VoiceBridge {
     /** Приложение на ТВ закончило слушать: просим телефон выдать результат. */
     fun stop() {
         main.post {
-            if (cb == null) return@post
+            if (sink == null) return@post
             ControlService.pages(JSONObject().put("t", "listen_stop").put("id", id).toString())
             armTimeout(8000)
         }
@@ -94,7 +105,7 @@ object VoiceBridge {
 
     fun cancel() {
         main.post {
-            if (cb == null) return@post
+            if (sink == null) return@post
             val wasId = id
             clear()
             last = "отменено"
@@ -105,7 +116,7 @@ object VoiceBridge {
     /** Сообщение от страницы на телефоне. */
     fun fromPhone(j: JSONObject) {
         main.post {
-            val c = cb ?: return@post
+            val c = sink ?: return@post
             if (j.optInt("id", -1) != id) return@post
             val err = j.optString("err")
             if (err.isNotEmpty()) {
@@ -121,16 +132,17 @@ object VoiceBridge {
             try {
                 if (!began) {
                     began = true
-                    c.beginningOfSpeech()
+                    c.begin()
                 }
                 if (j.optBoolean("final", false)) {
-                    c.endOfSpeech()
+                    c.end()
                     clear()
                     last = "ок: «" + (if (text.length > 30) text.take(30) + "…" else text) + "»"
-                    c.results(bundle(text))
+                    EventLog.add("голос: получен текст с телефона")
+                    c.result(text)
                 } else {
                     armTimeout(40000)
-                    c.partialResults(bundle(text))
+                    c.partial(text)
                 }
             } catch (_: Throwable) {
             }
