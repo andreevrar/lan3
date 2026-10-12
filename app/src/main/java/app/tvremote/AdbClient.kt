@@ -273,6 +273,20 @@ class AdbClient(private val ctx: Context) {
             val cur = (shellOut("settings get secure voice_recognition_service") ?: return false).trim()
             if (cur != mine) sp.edit().putString("voice_prev", cur).apply()
             ok = shell("settings put secure voice_recognition_service $mine")
+            if (ok) {
+                // Яндекс ТВ может сам вернуть свой сервис (Алису): проверяем, что настройка осталась
+                try {
+                    Thread.sleep(1500)
+                } catch (_: InterruptedException) {
+                }
+                val now = (shellOut("settings get secure voice_recognition_service") ?: "").trim()
+                if (now != mine) {
+                    EventLog.add("голос: система вернула «$now» — подмена не удалась")
+                    VoiceBridge.last = "Яндекс ТВ вернул свой сервис ($now)"
+                    sp.edit().putBoolean("voice_on", false).apply()
+                    return false
+                }
+            }
         } else {
             val prev = sp.getString("voice_prev", "") ?: ""
             ok = if (prev.isEmpty() || prev == "null" || prev == mine) {

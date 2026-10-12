@@ -362,6 +362,60 @@
   // ---------- связь с ТВ: WebSocket на самом ТВ (тот же адрес, откуда открыта страница) ----------
   var ws = null;
   var reconnectTimer = null;
+  // адреса ТВ: у ТВ может быть несколько (Wi-Fi и кабель), и после выключения они меняются
+  var known = [];
+  try { known = JSON.parse(lsGet('tv.hosts') || '[]') || []; } catch (e) { known = []; }
+  var cur = location.host;       // адрес, по которому сейчас подключаемся
+  var fails = 0, scanning = false;
+  function remember(hp) {
+    if (!hp || known.indexOf(hp) >= 0) return;
+    known.push(hp);
+    if (known.length > 8) known.shift();
+    lsSet('tv.hosts', JSON.stringify(known));
+  }
+  remember(location.host);
+  function nextHost() {
+    var list = known.slice();
+    if (list.indexOf(cur) < 0) list.push(cur);
+    cur = list[(list.indexOf(cur) + 1) % list.length];
+  }
+  // Поиск ТВ по всей подсети: если ни один из известных адресов не отвечает, пробуем все 254 адреса
+  function startScan() {
+    if (scanning) return;
+    var m = /^(\d+\.\d+\.\d+)\.\d+:(\d+)$/.exec(cur) || /^(\d+\.\d+\.\d+)\.\d+:(\d+)$/.exec(location.host);
+    if (!m) return;
+    scanning = true;
+    var pre = m[1], port = m[2], i = 1, active = 0, found = false, code = normCode(state.code);
+    setStatus('warn', 'Адрес ТВ изменился? Ищу ТВ в сети…');
+    function probe(n) {
+      var hp = pre + '.' + n + ':' + port, s2, done = false, t;
+      function end(ok) {
+        if (done) return;
+        done = true; clearTimeout(t); active--;
+        try { s2.close(); } catch (e) {}
+        if (ok && !found) { found = true; scanning = false; cur = hp; fails = 0; remember(hp); connect(); return; }
+        pump();
+      }
+      try { s2 = new WebSocket('ws://' + hp + '/ws'); } catch (e) { active--; pump(); return; }
+      t = setTimeout(function () { end(false); }, 1500);
+      s2.onopen = function () { try { s2.send(JSON.stringify({ t: 'auth', c: code })); } catch (e) {} };
+      s2.onmessage = function (ev) {
+        try { var j = JSON.parse(ev.data); if (j.online) end(true); else if (j.t === 'denied') end(false); } catch (e) {}
+      };
+      s2.onerror = function () { end(false); };
+      s2.onclose = function () { end(false); };
+    }
+    function pump() {
+      if (found) return;
+      while (active < 40 && i <= 254) { active++; probe(i++); }
+      if (active === 0 && i > 254 && !found) {
+        scanning = false; fails = 0;
+        setStatus('err', 'ТВ в сети не найден. Проверьте, что он включён и в той же сети Wi-Fi');
+      }
+    }
+    pump();
+  }
+
   var blocked = false; // true после «неверный код»: сами не переподключаемся
   var tv = null; // последний статус от ТВ; null — ещё не авторизовались
 
@@ -377,13 +431,20 @@
     else setStatus('warn', 'ТВ на связи: работают звук и медиа, для стрелок включите спец. возможности на ТВ');
   }
 
+  // после нескольких неудач пробуем другие известные адреса ТВ, потом ищем по всей подсети
+  function rotate() {
+    if (fails >= 2) nextHost();
+    if (fails >= 6 && !scanning) startScan();
+  }
+
   function connect() {
+    if (scanning) return;
     clearTimeout(reconnectTimer);
     if (ws) { var old = ws; ws = null; try { old.close(); } catch (e) {} }
     tv = null;
     var code = normCode(state.code);
     if (code.length < 8) { setStatus('', 'Введите код ТВ на вкладке «Связь»'); return; }
-    if (!location.host || location.protocol === 'file:') {
+    if (!cur || location.protocol === 'file:') {
       setStatus('err', 'Откройте страницу по адресу ТВ (он показан на экране ТВ), а не как файл');
       return;
     }
@@ -391,7 +452,7 @@
 
     var sock;
     try {
-      sock = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+      sock = new WebSocket('ws://' + cur + '/ws');
     } catch (e) {
       setStatus('err', 'Не удалось открыть соединение');
       return;
@@ -399,7 +460,7 @@
     ws = sock;
     var denied = false, pingTimer = null, watchdog = null;
     // если за 6 секунд соединение не открылось (ТВ ещё спит), пробуем заново, не ждём системный таймаут
-    var openTimer = setTimeout(function () { if (sock === ws && sock.readyState === 0) connect(); }, 6000);
+    var openTimer = setTimeout(function () { if (sock === ws && sock.readyState === 0) { fails++; rotate(); connect(); } }, 6000);
 
     // страница шлёт пинг раз в 5 с; если ТВ молчит дольше 12 с, связь считаем потерянной
     function arm() {
@@ -410,6 +471,7 @@
     sock.onopen = function () {
       if (sock !== ws) return;
       clearTimeout(openTimer);
+      fails = 0;
       sock.send(JSON.stringify({ t: 'auth', c: code }));
       pingTimer = setInterval(function () {
         if (sock.readyState === 1) sock.send('{"t":"ping"}');
@@ -431,7 +493,7 @@
       if (m.t === 'listen') { onListen(m); return; }
       if (m.t === 'listen_stop') { if (rec) { try { rec.stop(); } catch (e) {} } else if (!sentFinal && heard) finish(heard); return; }
       if (m.t === 'listen_cancel') { if (!sentFinal) { sentFinal = true; vSay('ТВ отменил запрос'); } endListening(); return; }
-      if (m.online) { tv = m; renderTv(); }
+      if (m.online) { tv = m; remember(cur); if (m.ips) m.ips.forEach(remember); renderTv(); }
     };
     sock.onclose = function () {
       clearTimeout(openTimer);
@@ -439,7 +501,9 @@
       clearTimeout(watchdog);
       if (sock !== ws || denied) return;
       tv = null;
-      setStatus('err', 'Нет связи с ТВ — пробую снова. Если долго: сверьте адрес ' + location.host + ' с адресом на экране ТВ (после выключения он мог поменяться)');
+      fails++;
+      rotate();
+      if (!scanning) setStatus('err', 'Нет связи с ТВ (' + cur + ') — пробую снова, при необходимости найду ТВ по сети');
       reconnectTimer = setTimeout(connect, 2000);
     };
     sock.onerror = function () {};

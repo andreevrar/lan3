@@ -255,15 +255,18 @@ class WebServer(
             respond(out, 400, "Bad Request", "text/plain; charset=utf-8", "400".toByteArray())
             return
         }
-        // Защита от чужих сайтов: страница должна быть открыта с самого ТВ.
+        // Защита от чужих сайтов: страница должна быть открыта с ТВ (любой его адрес) или из домашней сети.
+        // Страница сама ищет ТВ по сети, если его адрес сменился, поэтому адреса вида 192.168.x.x / 10.x.x.x допустимы.
+        // Доступ всё равно закрыт кодом.
         val origin = h["origin"]
         if (origin != null) {
-            val same = try {
-                URI(origin).authority == h["host"]
+            val ok = try {
+                val u = URI(origin)
+                u.authority == h["host"] || isPrivateHost(u.host)
             } catch (_: Throwable) {
                 false
             }
-            if (!same) {
+            if (!ok) {
                 respond(out, 403, "Forbidden", "text/plain; charset=utf-8", "403".toByteArray())
                 return
             }
@@ -390,6 +393,15 @@ class WebServer(
             else -> onCommand(j)
         }
         return true
+    }
+
+    private fun isPrivateHost(host: String?): Boolean {
+        if (host == null) return false
+        val p = host.split('.')
+        if (p.size != 4) return false
+        val a = p[0].toIntOrNull() ?: return false
+        val b = p[1].toIntOrNull() ?: return false
+        return a == 10 || (a == 192 && b == 168) || (a == 172 && b in 16..31)
     }
 
     private fun codeMatches(given: String): Boolean {
