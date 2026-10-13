@@ -343,6 +343,7 @@ class ControlService : Service() {
             .put("sup", Status.supervisor)
             .put("rsn", Status.startReason)
             .put("lk", Status.lastKey)
+            .put("v", try { packageManager.getPackageInfo(packageName, 0).versionName ?: "?" } catch (_: Throwable) { "?" })
             .put("ips", org.json.JSONArray(Net.localIps().map { it + ":" + Status.port }))
             .put("ev", org.json.JSONArray(EventLog.tail(6)))
             .toString()

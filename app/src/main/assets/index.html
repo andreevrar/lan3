@@ -303,6 +303,7 @@
     </div>
     <button class="key primary" id="connectBtn">Подключиться</button>
     <p class="hint" id="detail"></p>
+    <p class="hint" style="white-space:pre-line;font-size:11px;opacity:.75" id="plog"></p>
   </div>
   <p class="hint">Телефон и ТВ должны быть в одной сети Wi-Fi. Интернет не нужен: страница открыта прямо с ТВ. Код хранится только в этом браузере. Кто знает код и находится в вашей сети, тот может управлять ТВ. Если в приложении создали новый код, введите его здесь заново. Можно открыть страницу сразу с кодом: <code>http://адрес-тв:8080/#abcd-efgh-ijkl</code>. Чтобы пульт был всегда под рукой, добавьте страницу на главный экран телефона.</p>
 </section>
@@ -362,6 +363,18 @@
   // ---------- связь с ТВ: WebSocket на самом ТВ (тот же адрес, откуда открыта страница) ----------
   var ws = null;
   var reconnectTimer = null;
+  // журнал страницы: что делала связь (виден на вкладке «Связь»)
+  var PAGE_VER = 'стр. 1.4';
+  var plogLines = [];
+  function plog(msg) {
+    var d = new Date(), p2 = function (n) { return (n < 10 ? '0' : '') + n; };
+    plogLines.push(p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds()) + ' ' + msg);
+    if (plogLines.length > 14) plogLines.shift();
+    var el = document.getElementById('plog');
+    if (el) el.textContent = PAGE_VER + ' · журнал страницы:\n' + plogLines.join('\n');
+  }
+  plog('страница загружена с ' + location.host + (document.hidden ? ' (в фоне)' : ''));
+
   // адреса ТВ: у ТВ может быть несколько (Wi-Fi и кабель), и после выключения они меняются
   var known = [];
   try { known = JSON.parse(lsGet('tv.hosts') || '[]') || []; } catch (e) { known = []; }
@@ -386,6 +399,7 @@
     if (!m) return;
     scanning = true;
     var pre = m[1], port = m[2], i = 1, active = 0, found = false, code = normCode(state.code);
+    plog('ищу ТВ по подсети ' + pre + '.x');
     setStatus('warn', 'Адрес ТВ изменился? Ищу ТВ в сети…');
     function probe(n) {
       var hp = pre + '.' + n + ':' + port, s2, done = false, t;
@@ -393,7 +407,7 @@
         if (done) return;
         done = true; clearTimeout(t); active--;
         try { s2.close(); } catch (e) {}
-        if (ok && !found) { found = true; scanning = false; cur = hp; fails = 0; remember(hp); connect(); return; }
+        if (ok && !found) { plog('ТВ найден: ' + hp); found = true; scanning = false; cur = hp; fails = 0; remember(hp); connect(); return; }
         pump();
       }
       try { s2 = new WebSocket('ws://' + hp + '/ws'); } catch (e) { active--; pump(); return; }
@@ -410,6 +424,7 @@
       while (active < 40 && i <= 254) { active++; probe(i++); }
       if (active === 0 && i > 254 && !found) {
         scanning = false; fails = 0;
+        plog('поиск закончен: ТВ не найден');
         setStatus('err', 'ТВ в сети не найден. Проверьте, что он включён и в той же сети Wi-Fi');
       }
     }
@@ -423,6 +438,7 @@
     if (!tv) return;
     var lines = ['Состояние ТВ — ADB: ' + (tv.adb ? 'да' : 'нет') + ', быстрые кнопки: ' + (tv.fast ? 'да' : 'нет') + ', спец. возможности: ' + (tv.acc ? 'да' : 'нет') + ', сторож: ' + (tv.sup ? 'да' : 'нет')];
     if (tv.lk) lines.push('Последняя кнопка: ' + tv.lk);
+    if (tv.v) lines.push('Версия приложения на ТВ: ' + tv.v);
     if (tv.rsn) lines.push('Служба запущена: ' + tv.rsn);
     if (tv.ev && tv.ev.length) { lines.push('Журнал ТВ:'); lines = lines.concat(tv.ev); }
     detail.style.whiteSpace = 'pre-line';
@@ -449,6 +465,7 @@
       return;
     }
     setStatus('warn', 'Подключаюсь к ТВ…');
+    plog('подключаюсь к ' + cur + ' (неудач подряд: ' + fails + ')');
 
     var sock;
     try {
@@ -460,7 +477,7 @@
     ws = sock;
     var denied = false, pingTimer = null, watchdog = null;
     // если за 6 секунд соединение не открылось (ТВ ещё спит), пробуем заново, не ждём системный таймаут
-    var openTimer = setTimeout(function () { if (sock === ws && sock.readyState === 0) { fails++; rotate(); connect(); } }, 6000);
+    var openTimer = setTimeout(function () { if (sock === ws && sock.readyState === 0) { plog('таймаут подключения 6 с'); fails++; rotate(); connect(); } }, 6000);
 
     // страница шлёт пинг раз в 5 с; если ТВ молчит дольше 12 с, связь считаем потерянной
     function arm() {
@@ -472,6 +489,7 @@
       if (sock !== ws) return;
       clearTimeout(openTimer);
       fails = 0;
+      plog('соединение открыто, отправляю код');
       sock.send(JSON.stringify({ t: 'auth', c: code }));
       pingTimer = setInterval(function () {
         if (sock.readyState === 1) sock.send('{"t":"ping"}');
@@ -485,6 +503,7 @@
       if (m.t === 'denied') {
         denied = true;
         blocked = true;
+        plog('ТВ ответил: неверный код');
         setStatus('err', 'Неверный код. Сверьте его с экраном ТВ');
         $$('.tabs button')[2].click();
         return;
@@ -493,9 +512,10 @@
       if (m.t === 'listen') { onListen(m); return; }
       if (m.t === 'listen_stop') { if (rec) { try { rec.stop(); } catch (e) {} } else if (!sentFinal && heard) finish(heard); return; }
       if (m.t === 'listen_cancel') { if (!sentFinal) { sentFinal = true; vSay('ТВ отменил запрос'); } endListening(); return; }
-      if (m.online) { tv = m; remember(cur); if (m.ips) m.ips.forEach(remember); renderTv(); }
+      if (m.online) { if (!tv) plog('ТВ ответил: связь есть'); tv = m; remember(cur); if (m.ips) m.ips.forEach(remember); renderTv(); }
     };
-    sock.onclose = function () {
+    sock.onclose = function (ev) {
+      plog('соединение закрыто' + (ev && ev.code ? ' (код ' + ev.code + ')' : '') + (tv ? '' : ' до ответа ТВ'));
       clearTimeout(openTimer);
       clearInterval(pingTimer);
       clearTimeout(watchdog);
@@ -521,8 +541,9 @@
     if (!ws || ws.readyState > 1) connect();
     else if (ws.readyState === 1) { try { ws.send('{"t":"ping"}'); } catch (e) { connect(); } }
   }
-  document.addEventListener('visibilitychange', function () { if (!document.hidden) kick(); });
-  window.addEventListener('online', kick);
+  document.addEventListener('visibilitychange', function () { plog(document.hidden ? 'страница ушла в фон' : 'страница снова на экране'); if (!document.hidden) kick(); });
+  window.addEventListener('online', function () { plog('телефон: сеть появилась'); kick(); });
+  window.addEventListener('offline', function () { plog('телефон: сеть пропала'); });
   window.addEventListener('focus', kick);
   window.addEventListener('pageshow', kick);
   setInterval(function () {

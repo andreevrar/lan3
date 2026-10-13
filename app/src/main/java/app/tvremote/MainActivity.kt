@@ -51,7 +51,8 @@ class MainActivity : Activity() {
         root.setPadding(dp(40), dp(28), dp(40), dp(28))
         root.setBackgroundColor(0xFF101418.toInt())
 
-        root.addView(label("ТВ-пульт", 30f, 0xFFFFFFFF.toInt()))
+        val ver = try { packageManager.getPackageInfo(packageName, 0).versionName } catch (_: Throwable) { "?" }
+        root.addView(label("ТВ-пульт  (версия $ver)", 30f, 0xFFFFFFFF.toInt()))
         root.addView(label("1. Откройте в браузере телефона (он должен быть в том же Wi-Fi):", 18f, 0xFF9AA4AF.toInt()))
         addrView = label("", 36f, 0xFFFFFFFF.toInt())
         root.addView(addrView)
